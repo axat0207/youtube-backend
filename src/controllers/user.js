@@ -2,9 +2,30 @@ import { User } from "../models/user.model.js";
 import uploadOnCloudinary from "../utils/cloudinary.js";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
+import {z} from 'zod'
 
+
+const registerInput = z.object({
+  fullName: z.string().min(3),  //name is a string and should be at least 3 characters long
+  email: z.string().email(),   //email is a valid email address
+  username : z.string().min(2).max(20),
+  password : z.string().min(3).max(20)
+})
+
+// type registerParse = z.infer<typeof registerInput>;
 const registerUser = async (req, res) => {
-  const { username, email, fullName, password } = req.body;
+  const parsedResponse = registerInput.safeParse(req.body);
+  if(!parsedResponse.success){
+    return res.status(400).send(parsedResponse.error);
+  }
+  // const { username, email, fullName, password } = req.body;
+
+  const username = parsedResponse.data.username;
+  const email = parsedResponse.data.email;
+  const fullName = parsedResponse.data.fullName;
+  const  password = parsedResponse.data.password;
+
+
 
   try {
     if (
@@ -74,7 +95,9 @@ const login = async (req, res) => {
 
   try {
     if (!email && !username) {
-      return res.status(400).json({ message: "Email or Username are required" });
+      return res
+        .status(400)
+        .json({ message: "Email or Username are required" });
     }
 
     const user = await User.findOne({
@@ -91,17 +114,27 @@ const login = async (req, res) => {
       return res.status(401).json({ message: "Invalid Password!" });
     }
 
-    const accessToken = jwt.sign({ _id: user._id }, process.env.ACCESS_TOKEN_SECRET, {
-      expiresIn: process.env.ACCESS_TOKEN_EXPIRY,
-    });
-    const refreshToken = jwt.sign({ _id: user._id }, process.env.REFRESH_TOKEN_SECRET, {
-      expiresIn: process.env.REFRESH_TOKEN_EXPIRY,
-    });
+    const accessToken = jwt.sign(
+      { _id: user._id },
+      process.env.ACCESS_TOKEN_SECRET,
+      {
+        expiresIn: process.env.ACCESS_TOKEN_EXPIRY,
+      }
+    );
+    const refreshToken = jwt.sign(
+      { _id: user._id },
+      process.env.REFRESH_TOKEN_SECRET,
+      {
+        expiresIn: process.env.REFRESH_TOKEN_EXPIRY,
+      }
+    );
 
     user.refreshToken = refreshToken;
     await user.save({ validateBeforeSave: false });
 
-    const loggedInUser = await User.findById(user._id).select("-password -refreshToken");
+    const loggedInUser = await User.findById(user._id).select(
+      "-password -refreshToken"
+    );
 
     const options = {
       httpOnly: true,
@@ -111,13 +144,17 @@ const login = async (req, res) => {
     res.cookie("accessToken", accessToken, options);
     res.cookie("refreshToken", refreshToken, options);
 
-    return res.status(200).json({ message: "User logged In Successfully", loggedInUser, accessToken, refreshToken });
+    return res
+      .status(200)
+      .json({
+        message: "User logged In Successfully",
+        loggedInUser,
+        accessToken,
+        refreshToken,
+      });
   } catch (error) {
     res.status(500).json({ message: "Something went wrong" + error });
   }
 };
-
-
-
 
 export { registerUser, login };
