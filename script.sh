@@ -1,0 +1,1 @@
+ssh -t -i youtubeSshKey.pem ubantu@ec2-65-2-33-120.ap-south-1.compute.amazonaws.com
