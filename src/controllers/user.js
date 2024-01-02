@@ -23,14 +23,14 @@ const registerUser = async (req, res) => {
   const email = parsedResponse.data.email;
   const fullName = parsedResponse.data.fullName;
   const password = parsedResponse.data.password;
-
+  const hasedPassword = await bcrypt.hash(password, 10);
   try {
     if (
       [fullName, email, username, password].some(
         (field) => field?.trim() === ""
       )
     ) {
-      throw new ApiError(400, "All fields are required");
+      res.status(400).json({ message: "All fields are Required" });
     }
 
     const existedUser = await User.findOne({
@@ -70,12 +70,10 @@ const registerUser = async (req, res) => {
       fullName,
       avatar: avatar.url,
       coverImage: coverImage?.url || "",
-      password,
+      password: hasedPassword,
     });
 
-    const createUser = await User.findById(user._id).select(
-      "-password -refreshToken"
-    );
+    const createUser = await User.findById(user._id).select(" -refreshToken");
 
     if (!createUser) {
       return res.status(500).json({ message: "Something Went wrong." });
@@ -89,7 +87,6 @@ const registerUser = async (req, res) => {
       res.clearCookie("refreshToken", options);
     }
     return res.status(201).json(createUser);
-    console.log("Created user sucessfully");
   } catch (error) {
     res.status(500).json({ message: "Something went wrong" + error });
   }
@@ -98,63 +95,65 @@ const registerUser = async (req, res) => {
 const login = async (req, res) => {
   const { email, username, password } = req.body;
 
-  // try {
-  if (!email || !password || username) {
-    return res
-      .status(400)
-      .json({ message: "Email or Username and Password is required" });
+  if (!email || !username) {
+    res.status(400).json({ message: "Email is required" });
   }
 
-  const user = await User.findOne({
-    $or: [{ email }, { username }],
-  });
-
-  if (!user) {
-    return res.status(401).json({ message: "User does not exist!" });
+  if (!password) {
+    res.status(400).json({ message: "password is required" });
   }
+  try {
+    const user = await User.findOne({
+      $or: [{ email }, { username }],
+    });
 
-  // const validPassword = await bcrypt.compare(password, user.password);
-
-  if (password != user.password) {
-    return res.status(401).json({ message: "Invalid Password!" });
-  }
-
-  const accessToken = jwt.sign(
-    { _id: user._id },
-    process.env.ACCESS_TOKEN_SECRET,
-    {
-      expiresIn: process.env.ACCESS_TOKEN_EXPIRY,
+    if (!user) {
+      return res.status(401).json({ message: "User does not exist!" });
     }
-  );
-  const refreshToken = jwt.sign(
-    { _id: user._id },
-    process.env.REFRESH_TOKEN_SECRET,
-    {
-      expiresIn: process.env.REFRESH_TOKEN_EXPIRY,
+
+    const validPassword = await bcrypt.compare(password, user.password);
+    if (!validPassword) {
+      return res.status(401).json({ message: "Invalid Password" });
     }
-  );
 
-  user.refreshToken = refreshToken;
-  await user.save({ validateBeforeSave: false });
+    const accessToken = jwt.sign(
+      { _id: user._id },
+      process.env.ACCESS_TOKEN_SECRET,
+      {
+        expiresIn: process.env.ACCESS_TOKEN_EXPIRY,
+      }
+    );
+    const refreshToken = jwt.sign(
+      { _id: user._id },
+      process.env.REFRESH_TOKEN_SECRET,
+      {
+        expiresIn: process.env.REFRESH_TOKEN_EXPIRY,
+      }
+    );
 
-  const loggedInUser = await User.findById(user._id).select(
-    "-password -refreshToken"
-  );
+    user.refreshToken = refreshToken;
+    await user.save({ validateBeforeSave: false });
 
-  const options = {
-    httpOnly: true,
-    secure: true,
-  };
+    const loggedInUser = await User.findById(user._id).select(" -refreshToken");
 
-  res.cookie("accessToken", accessToken, options);
-  res.cookie("refreshToken", refreshToken, options);
+    const options = {
+      httpOnly: true,
+      secure: true,
+    };
 
-  return res.status(200).json({
-    message: "User logged In Successfully",
-    loggedInUser,
-    accessToken,
-    refreshToken,
-  });
+    res.cookie("accessToken", accessToken, options);
+    res.cookie("refreshToken", refreshToken, options);
+
+    return res.status(200).json({
+      message: "User logged In Successfully",
+      loggedInUser,
+      accessToken,
+      refreshToken,
+    });
+  } catch (error) {
+    console.error(error.message);
+    res.status(500).json({ message: "Internal Srver Error" });
+  }
 };
 
 const logout = async (req, res) => {
@@ -188,50 +187,166 @@ const refreshAccessToken = async (req, res) => {
   if (!incomingRefreshToken) {
     res.status(401).json({ message: "Unathorized Access" });
   }
- try {
-   const decodedToken = jwt.verify(
-     incomingRefreshToken,
-     proces.env.REFRESH_TOKEN_SECRET
-   );
-   if (!decodedToken) {
-     res.status(401).json({ message: "Invalid Token" });
-   }
-   const user = await User.findById(decodedToken?._id);
- 
-   const newAccessToken = jwt.sign(
-     { _id: user._id },
-     process.env.ACCESS_TOKEN_SECRET,
-     {
-       expiresIn: process.env.ACCESS_TOKEN_EXPIRY,
-     }
-   );
-   const newRefreshToken = jwt.sign(
-     { _id: user._id },
-     process.env.REFRESH_TOKEN_SECRET,
-     {
-       expiresIn: process.env.REFRESH_TOKEN_EXPIRY,
-     }
-   );
- 
-   const options = {
-     httpOnly: true,
-     secure: true,
-   };
- 
-   res
-     .status(200)
-     .cookie("accessToken", newAccessToken, options)
-     .cookie("refreshToken", newRefreshToken, options)
-     .json({
-       message: "New Access token generated",
-       accessToken: newAccessToken,
-       refreshToken: newRefreshToken,
-     });
- } catch (error) {
-  console.log(error);
-  res.status(500).json({ message: "Server Error" + error?.message });
-    
- }
+  try {
+    const decodedToken = jwt.verify(
+      incomingRefreshToken,
+      proces.env.REFRESH_TOKEN_SECRET
+    );
+    if (!decodedToken) {
+      res.status(401).json({ message: "Invalid Token" });
+    }
+    const user = await User.findById(decodedToken?._id);
+
+    const newAccessToken = jwt.sign(
+      { _id: user._id },
+      process.env.ACCESS_TOKEN_SECRET,
+      {
+        expiresIn: process.env.ACCESS_TOKEN_EXPIRY,
+      }
+    );
+    const newRefreshToken = jwt.sign(
+      { _id: user._id },
+      process.env.REFRESH_TOKEN_SECRET,
+      {
+        expiresIn: process.env.REFRESH_TOKEN_EXPIRY,
+      }
+    );
+
+    const options = {
+      httpOnly: true,
+      secure: true,
+    };
+
+    res
+      .status(200)
+      .cookie("accessToken", newAccessToken, options)
+      .cookie("refreshToken", newRefreshToken, options)
+      .json({
+        message: "New Access token generated",
+        accessToken: newAccessToken,
+        refreshToken: newRefreshToken,
+      });
+  } catch (error) {
+    console.log(error);
+    res.status(500).json({ message: "Server Error" + error?.message });
+  }
 };
 
-export { registerUser, login, logout, refreshAccessToken };
+const changeCurrentPassword = async (req, res) => {
+  const { newPassword } = req.body;
+  if (!newPassword) {
+    return res
+      .status(400)
+      .json({ message: "Please provide a valid password." });
+  }
+  const hashNewPassword = await bcrypt.hash(newPassword, 10);
+  try {
+    const updatedUser = await User.findByIdAndUpdate(
+      req.user?._id,
+      {
+        $set: {
+          password: hashNewPassword,
+        },
+      },
+      {
+        new: true,
+      }
+    );
+    if (!updatedUser) {
+      return res.status(404).json({ message: "User not found" });
+    }
+    const checkUpdatedPassword = await User.findById(req.user?._id);
+    console.log(checkUpdatedPassword);
+    res.status(200).json({ message: "Password change sucessfully" });
+  } catch (error) {
+    console.error(error.message);
+    res.status(500).json({ message: "Internal Server Error" + error.message });
+  }
+};
+
+const getUser = async (req, res) => {
+  try {
+    const user = await User.findById(req.user?._id).select(
+      "-password -refreshToken"
+    );
+    if (!user) {
+      res.status(400).json({ message: "User Not found" });
+    }
+    res.status(200).json({ user });
+  } catch (error) {
+    console.error(error.message);
+    res.status(500).json({ message: "Internal Server Error" });
+  }
+};
+
+const updateUser = async (req, res) => {
+  const { fullName, email } = req.body;
+  try {
+    const user = await User.findByIdAndUpdate(
+      req.user._id,
+      {
+        $set: {
+          email,
+          fullName,
+        },
+      },
+      {
+        new: true,
+      }
+    );
+    if (!user) {
+      return res.status(404).json({ message: "User not found!" });
+    }
+    res.status(200).json({ user });
+  } catch (error) {
+    console.error(error.message);
+    res.status(500).json({ message: "Internal Server Error " });
+  }
+};
+
+const updateAvtar = async (req, res) => {
+  const newLocalAvatar = req.file?.path;
+  if (!newLocalAvatar) {
+    return res.status(400).json("Please upload a valid image");
+  }
+  try {
+    const newCloudAvatar = await uploadOnCloudinary(newLocalAvatar);
+    //delete old avatar from cloudinary and local system
+    if (!newCloudAvatar.url) {
+      return res.status(400).json("Error on upload of avatar");
+    }
+
+    await findByIdAndUpdate(
+      req.user?._id,
+      {
+        $set: {
+          avatar: newCloudAvatar.url,
+        },
+      },
+      {
+        new: true,
+      }
+    );
+    res.status(201).json({
+      message: "Avatar Updated Sucessfully",
+      avatar: newCloudAvatar.url,
+    });
+  } catch (error) {
+    console.error(error.message);
+    // If there's an error we want to
+    // send a 500 Internal Server Error status response
+    // And also include the error in the JSON body.
+    res.status(500).send({ error: /Error updating avatar/ });
+  }
+};
+
+export {
+  registerUser,
+  login,
+  logout,
+  refreshAccessToken,
+  changeCurrentPassword,
+  getUser,
+  updateUser,
+  updateAvtar,
+};

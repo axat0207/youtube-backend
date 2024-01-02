@@ -12,7 +12,7 @@ export async function verifyJwt(req, res, next) {
         if (!user) {
             return res.status(400).json({ message: 'Invalid token' });
         }
-
+        // console.log(user)
         req.user = user;
         next();
     } catch (error) {
